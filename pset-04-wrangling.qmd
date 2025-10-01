@@ -83,7 +83,7 @@ Hints: 1) Use the `resp_body_json` function. 2) The first row of the matrix will
 
 ```{r}
 population <- resp_body_json(response, simplifyVector = TRUE)
-population
+# population
 ```
 
 6. Examine the `population` matrix you just created. Notice that 1) it is not tidy, 2) the column types are not what we want, and 3) the first row is a header. Convert `population` to a tidy dataset. Remove the state ID column and change the name of the column with state names to `state_name`. Add a column with state abbreviations called `state`. Make sure you assign the abbreviations for DC and PR correctly. Hint: Use the **janitor** package to make the first row the header. 
@@ -93,27 +93,35 @@ population
 #| warning: false
 library(tidyverse)
 library(janitor)
-population <- population |> row_to_names(1)## Use janitor row to names function
+population <- population |> 
+  row_to_names(1) |> ## Use janitor row to names function
+  as_tibble() |> # convert to tibble
+  select(-state) |> # remove state ID column
+  rename(state_name = NAME) |> # rename state column to state_name
+  pivot_longer(cols = c(POP_2020,POP_2021), names_to = "year", values_to = "state_population") |> # use pivot_longer to tidy
+  mutate(year = sub("POP_", "", year)) |> # remove POP_ from year
+  mutate(year = as.numeric(year), state_population = as.numeric(state_population)) |> # parse all relevant columns to numeric
+  mutate( 
+    state = case_when( # add state abbreviations using state.abb variable
+      state_name == "Puerto Rico" ~ "PR", # use case_when to add abbreviations for DC and PR
+      state_name == "District of Columbia" ~ "DC",
+      TRUE ~ state.abb[match(state_name, state.name)] # default
+    )
+  ) 
+  
 population
-  # convert to tibble
-  # remove stat column
-  # rename state column to state_name
-  # use pivot_longer to tidy
-  # remove POP_ from year
-  # parese all relevant colunns to numeric
-  # add state abbreviations using state.abb variable
-  # use case_when to add abbreviations for DC and PR
 ```
 
 7. As a check, make a barplot of states' 2021 and 2022 populations. Show the state names in the y-axis ordered by population size.  Hint: You will need to use `reorder` and use `facet_wrap`.
 
 ```{r}
-# population |> 
-  # reorder state
-  # assign aesthetic mapping
-  # use geom_col to plot barplot
-  # flip coordinates
-  # facet by year
+population |> 
+  mutate(state = reorder(state, state_population, FUN = mean)) |> # reorder state
+  ggplot(aes(state, state_population)) + # assign aesthetic mapping
+    geom_col() + # use geom_col to plot barplot
+    coord_flip() + # flip coordinates
+    facet_wrap(~year) # facet by year
+
 ```
 
 
@@ -131,14 +139,28 @@ points to a JSON file that lists the states in the 10 Public Health Service (PHS
 library(jsonlite)
 library(purrr)
 url <- "https://github.com/datasciencelabs/2025/raw/refs/heads/main/data/regions.json"
-# regions <- use jsonlit JSON parser 
-# regions <- convert list to data frame. You can use map_df in purrr package 
+
+request(url) |>
+  req_perform() |>
+  resp_body_string() |>
+  fromJSON() -> regions # use jsonlit JSON parser 
+
+regions <- regions |>
+  unnest(states) |> # creates row for each state
+  mutate(region = map_int(region, 1)) |> # pulls out region number from list of length 1
+  select(state_name = states, region = region, region_name = region_name) # reordering and renaming 
+
+regions$region_name[regions$region_name == "New York and New Jersey, Puerto Rico, Virgin Islands"] <- "NY & NJ, PR, VI"
+regions
 ```
 
 9. Add a region and region name columns to the `population` data frame.
 
 ```{r}
-# population <- 
+population <- population |>
+  left_join(regions, by = "state_name") 
+
+population
 ```
 
 
@@ -147,8 +169,14 @@ url <- "https://github.com/datasciencelabs/2025/raw/refs/heads/main/data/regions
 
 ```{r}
 api <- "https://data.cdc.gov/resource/pwn4-m3yp.json"
-# cases_raw <- 
+cases_raw <- request(api) |>
+  req_perform() |>
+  resp_body_json(simplifyVector = TRUE)
+
+cases_raw
 ```
+
+The data is not all there. There should be data for every state, for every week for 3 years. This table only has 1000 rows due to the default API limit. 
 
 We see exactly 1,000 rows. We should be seeing over $52 \times 3$ rows per state.
 
